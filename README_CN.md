@@ -39,6 +39,12 @@ python main.py
 
 服务器将在 http://localhost:8000 启动
 
+可通过 `PORT` 覆盖端口：
+
+```bash
+PORT=9000 python main.py
+```
+
 ## API Key（可选）
 
 设置环境变量 `YTDLP_API_KEY` 后会启用 API Key 校验；未设置时不校验。

@@ -39,6 +39,12 @@ python main.py
 
 The server will start at http://localhost:8000
 
+You can override the port with `PORT`:
+
+```bash
+PORT=9000 python main.py
+```
+
 ## API Key (Optional)
 
 Set `YTDLP_API_KEY` to enable API key checks. If not set, no API key is required.
