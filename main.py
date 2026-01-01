@@ -269,7 +269,7 @@ class State:
 # 创建全局状态对象
 state = State()
 
-def download_video(url: str, output_path: str = "./downloads", format: str = "best", quiet: bool = False, progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, Any]:
+def download_video(url: str, output_path: str = "./downloads", format: str = "best", quiet: bool = False, progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None, cookie: Optional[str] = None) -> Dict[str, Any]:
     """
     Download a video from the specified URL using yt-dlp.
     
@@ -298,6 +298,10 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
     if progress_hook:
         progress_hooks.append(progress_hook)
     
+    http_headers: Dict[str, str] = {}
+    if cookie:
+        http_headers["Cookie"] = cookie
+
     ydl_opts = {
         'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
         'quiet': quiet,
@@ -307,6 +311,8 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
         # 添加进度钩子来处理文件名
         'progress_hooks': progress_hooks,
     }
+    if http_headers:
+        ydl_opts['http_headers'] = http_headers
     
     # 如果需要更安全的处理，我们可以在下载前先获取信息
     temp_ydl_opts = {
@@ -314,6 +320,8 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
         'no_warnings': True,
         'skip_download': True,
     }
+    if http_headers:
+        temp_ydl_opts['http_headers'] = http_headers
     
     try:
         # 先获取视频信息来生成安全的文件名
@@ -483,8 +491,9 @@ class DownloadRequest(BaseModel):
     output_path: str = "./downloads"
     format: str = "bestvideo+bestaudio/best"
     quiet: bool = False
+    cookie: Optional[str] = None
 
-async def process_download_task(task_id: str, url: str, output_path: str, format: str, quiet: bool):
+async def process_download_task(task_id: str, url: str, output_path: str, format: str, quiet: bool, cookie: Optional[str] = None):
     """Asynchronously process download task"""
     try:
         if state.is_cancel_requested(task_id):
@@ -511,6 +520,7 @@ async def process_download_task(task_id: str, url: str, output_path: str, format
                     format=format,
                     quiet=quiet,
                     progress_hook=progress_hook,
+                    cookie=cookie,
                 )
             )
         state.update_task(task_id, "completed", result=result)
@@ -527,7 +537,9 @@ async def api_download_video(request: DownloadRequest):
     Submit a video download task and return a task ID to track progress.
     """
     # 如果有相同的url和output_path的任务已经存在，直接返回该任务
-    existing_task = next((task for task in state.tasks.values() if task.format == request.format and task.url == request.url and task.output_path == request.output_path), None)
+    existing_task = None
+    if request.cookie is None:
+        existing_task = next((task for task in state.tasks.values() if task.format == request.format and task.url == request.url and task.output_path == request.output_path), None)
     if existing_task:
         return {"status": "success", "task_id": existing_task.id}
     task_id = state.add_task(request.url, request.output_path, request.format)
@@ -538,7 +550,8 @@ async def api_download_video(request: DownloadRequest):
         url=request.url,
         output_path=request.output_path,
         format=request.format,
-        quiet=request.quiet
+        quiet=request.quiet,
+        cookie=request.cookie,
     ))
     
     return {"status": "success", "task_id": task_id}

@@ -69,7 +69,8 @@ POST /download
     "url": "video_url",
     "output_path": "./downloads",  // Optional, defaults to "./downloads"
     "format": "bestvideo+bestaudio/best",  // Optional, defaults to best quality
-    "quiet": false  // Optional, whether to download quietly
+    "quiet": false,  // Optional, whether to download quietly
+    "cookie": "NAME=VALUE; NAME2=VALUE2"  // Optional, Cookie header value
 }
 ```
 

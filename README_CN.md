@@ -69,7 +69,8 @@ POST /download
     "url": "视频URL",
     "output_path": "./downloads",  // 可选，默认为 "./downloads"
     "format": "bestvideo+bestaudio/best",  // 可选，默认为最佳质量
-    "quiet": false  // 可选，是否静默下载
+    "quiet": false,  // 可选，是否静默下载
+    "cookie": "NAME=VALUE; NAME2=VALUE2"  // 可选，Cookie 请求头值
 }
 ```
 
