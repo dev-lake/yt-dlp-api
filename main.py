@@ -1,6 +1,7 @@
 import yt_dlp
 import os
 import glob
+import tempfile
 import uuid
 
 import asyncio
@@ -9,10 +10,10 @@ import json
 import datetime
 import sqlite3
 from typing import Dict, Any, Optional, List, Callable, Set
-from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request, UploadFile
 from fastapi.responses import JSONResponse, FileResponse
 import uvicorn
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from concurrent.futures import ThreadPoolExecutor
 from yt_dlp.utils import DownloadCancelled
 
@@ -269,7 +270,7 @@ class State:
 # 创建全局状态对象
 state = State()
 
-def download_video(url: str, output_path: str = "./downloads", format: str = "best", quiet: bool = False, progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None, cookie: Optional[str] = None) -> Dict[str, Any]:
+def download_video(url: str, output_path: str = "./downloads", format: str = "best", quiet: bool = False, progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None, cookie_file_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Download a video from the specified URL using yt-dlp.
     
@@ -278,6 +279,7 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
         output_path (str): Directory where the video will be saved
         format (str): Video format to download (e.g., "best", "bestvideo+bestaudio", "mp4")
         quiet (bool): If True, suppress output
+        cookie_file_path (str): Cookie file path for authenticated downloads
         
     Returns:
         Dict[str, Any]: Information about the downloaded video
@@ -298,10 +300,6 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
     if progress_hook:
         progress_hooks.append(progress_hook)
     
-    http_headers: Dict[str, str] = {}
-    if cookie:
-        http_headers["Cookie"] = cookie
-
     ydl_opts = {
         'outtmpl': os.path.join(output_path, '%(title).180s.%(ext)s'),
         'quiet': quiet,
@@ -311,8 +309,8 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
         # 添加进度钩子来处理文件名
         'progress_hooks': progress_hooks,
     }
-    if http_headers:
-        ydl_opts['http_headers'] = http_headers
+    if cookie_file_path:
+        ydl_opts['cookiefile'] = cookie_file_path
     
     # 如果需要更安全的处理，我们可以在下载前先获取信息
     temp_ydl_opts = {
@@ -320,8 +318,8 @@ def download_video(url: str, output_path: str = "./downloads", format: str = "be
         'no_warnings': True,
         'skip_download': True,
     }
-    if http_headers:
-        temp_ydl_opts['http_headers'] = http_headers
+    if cookie_file_path:
+        temp_ydl_opts['cookiefile'] = cookie_file_path
     
     try:
         # 先获取视频信息来生成安全的文件名
@@ -396,6 +394,22 @@ def build_progress_payload(progress_data: Dict[str, Any]) -> Dict[str, Any]:
         "percent": percent,
         "filename": progress_data.get("filename"),
     }
+
+def parse_form_bool(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+async def save_cookie_upload(cookie_upload: UploadFile) -> str:
+    suffix = os.path.splitext(cookie_upload.filename or "")[1]
+    if not suffix:
+        suffix = ".cookies"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        content = await cookie_upload.read()
+        temp_file.write(content)
+        return temp_file.name
 
 def is_within_directory(path: str, base_dir: str) -> bool:
     try:
@@ -491,9 +505,8 @@ class DownloadRequest(BaseModel):
     output_path: str = "./downloads"
     format: str = "bestvideo+bestaudio/best"
     quiet: bool = False
-    cookie: Optional[str] = None
 
-async def process_download_task(task_id: str, url: str, output_path: str, format: str, quiet: bool, cookie: Optional[str] = None):
+async def process_download_task(task_id: str, url: str, output_path: str, format: str, quiet: bool, cookie_file_path: Optional[str] = None):
     """Asynchronously process download task"""
     try:
         if state.is_cancel_requested(task_id):
@@ -520,7 +533,7 @@ async def process_download_task(task_id: str, url: str, output_path: str, format
                     format=format,
                     quiet=quiet,
                     progress_hook=progress_hook,
-                    cookie=cookie,
+                    cookie_file_path=cookie_file_path,
                 )
             )
         state.update_task(task_id, "completed", result=result)
@@ -530,28 +543,67 @@ async def process_download_task(task_id: str, url: str, output_path: str, format
         state.update_task(task_id, "failed", error=str(e))
     finally:
         state.clear_cancel(task_id)
+        if cookie_file_path:
+            try:
+                if os.path.isfile(cookie_file_path):
+                    os.remove(cookie_file_path)
+            except Exception as e:
+                print(f"Error deleting cookie file {cookie_file_path}: {e}")
 
 @app.post("/download", response_class=JSONResponse)
-async def api_download_video(request: DownloadRequest):
+async def api_download_video(request: Request):
     """
     Submit a video download task and return a task ID to track progress.
     """
+    content_type = request.headers.get("content-type", "")
+    cookie_file_path: Optional[str] = None
+
+    if not content_type or content_type.startswith("application/json"):
+        try:
+            data = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        try:
+            payload = DownloadRequest.model_validate(data)
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=e.errors())
+        url = payload.url
+        output_path = payload.output_path
+        format_str = payload.format
+        quiet = payload.quiet
+    elif content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        url = form.get("url")
+        if not url:
+            raise HTTPException(status_code=400, detail="url is required")
+        output_path = form.get("output_path") or "./downloads"
+        format_str = form.get("format") or "bestvideo+bestaudio/best"
+        quiet = parse_form_bool(form.get("quiet"))
+        cookie_upload = form.get("cookie_file")
+        if cookie_upload:
+            if not isinstance(cookie_upload, UploadFile):
+                raise HTTPException(status_code=400, detail="cookie_file must be a file")
+            cookie_file_path = await save_cookie_upload(cookie_upload)
+    else:
+        raise HTTPException(status_code=415, detail="Unsupported Content-Type")
+
     # 如果有相同的url和output_path的任务已经存在，直接返回该任务
     existing_task = None
-    if request.cookie is None:
-        existing_task = next((task for task in state.tasks.values() if task.format == request.format and task.url == request.url and task.output_path == request.output_path), None)
+    if cookie_file_path is None:
+        existing_task = next((task for task in state.tasks.values() if task.format == format_str and task.url == url and task.output_path == output_path), None)
     if existing_task:
         return {"status": "success", "task_id": existing_task.id}
-    task_id = state.add_task(request.url, request.output_path, request.format)
+
+    task_id = state.add_task(url, output_path, format_str)
     
     # Asynchronously execute download task
     asyncio.create_task(process_download_task(
         task_id=task_id,
-        url=request.url,
-        output_path=request.output_path,
-        format=request.format,
-        quiet=request.quiet,
-        cookie=request.cookie,
+        url=url,
+        output_path=output_path,
+        format=format_str,
+        quiet=quiet,
+        cookie_file_path=cookie_file_path,
     ))
     
     return {"status": "success", "task_id": task_id}

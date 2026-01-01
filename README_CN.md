@@ -63,15 +63,24 @@ PORT=9000 python main.py
 POST /download
 ```
 
-**请求体：**
+**请求体（JSON）：**
 ```json
 {
     "url": "视频URL",
     "output_path": "./downloads",  // 可选，默认为 "./downloads"
     "format": "bestvideo+bestaudio/best",  // 可选，默认为最佳质量
-    "quiet": false,  // 可选，是否静默下载
-    "cookie": "NAME=VALUE; NAME2=VALUE2"  // 可选，Cookie 请求头值
+    "quiet": false  // 可选，是否静默下载
 }
+```
+
+**上传 Cookie 文件（multipart/form-data）：**
+```bash
+curl -X POST http://localhost:8000/download \
+  -F "url=视频URL" \
+  -F "output_path=./downloads" \
+  -F "format=bestvideo+bestaudio/best" \
+  -F "quiet=false" \
+  -F "cookie_file=@/path/to/cookies.txt"
 ```
 
 **返回：**

@@ -63,15 +63,24 @@ Send the key using one of the following headers:
 POST /download
 ```
 
-**Request Body:**
+**Request Body (JSON):**
 ```json
 {
     "url": "video_url",
     "output_path": "./downloads",  // Optional, defaults to "./downloads"
     "format": "bestvideo+bestaudio/best",  // Optional, defaults to best quality
-    "quiet": false,  // Optional, whether to download quietly
-    "cookie": "NAME=VALUE; NAME2=VALUE2"  // Optional, Cookie header value
+    "quiet": false  // Optional, whether to download quietly
 }
+```
+
+**Request (multipart/form-data) with cookie file:**
+```bash
+curl -X POST http://localhost:8000/download \
+  -F "url=video_url" \
+  -F "output_path=./downloads" \
+  -F "format=bestvideo+bestaudio/best" \
+  -F "quiet=false" \
+  -F "cookie_file=@/path/to/cookies.txt"
 ```
 
 **Response:**
