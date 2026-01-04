@@ -20,6 +20,7 @@
 
 - Python 3.7+
 - FastAPI
+- python-multipart（用于文件上传）
 - yt-dlp
 - uvicorn
 - pydantic

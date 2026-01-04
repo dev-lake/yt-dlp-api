@@ -20,6 +20,7 @@ A RESTful API service built with FastAPI and yt-dlp for video information retrie
 
 - Python 3.7+
 - FastAPI
+- python-multipart (for file upload)
 - yt-dlp
 - uvicorn
 - pydantic
